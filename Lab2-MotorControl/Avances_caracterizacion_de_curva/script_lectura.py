@@ -1,6 +1,6 @@
 import serial
 
-puerto = 'COM1'        # Cambia esto por tu puerto correcto
+puerto = 'COM11'        # Cambia esto por tu puerto correcto
 baudrate = 115200
 nombre_archivo = 'caracterizacion.csv'
 
