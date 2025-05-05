@@ -1,8 +1,8 @@
 // === Configuración PWM usando defines ===
-#define PWM_PIN         15      // Pin GPIO para salida PWM
+#define PWM_PIN         18      // Pin GPIO para salida PWM
 #define PWM_FREQ        500    // Frecuencia del PWM en Hz
 #define PWM_RESOLUTION  8       // Resolución del PWM (bits)
-#define DUTY_CYCLE      255     // Ciclo de trabajo (0-255 para 8 bits). Cambiar a variable en punto 3 y 4
+#define DUTY_CYCLE      255     // Ciclo de trabajo (0-255 para 8 bits).
 
 const int pulsesPerRevolution = 20;
 const int encoderPin = 16;
@@ -47,7 +47,7 @@ void loop() {
 
     // Guardar en buffer
     if (bufferIndex < bufferSize) {
-      dataBuffer[bufferIndex++] = {currentMillis, count}; //cambiar count a rpm, ojo
+      dataBuffer[bufferIndex++] = {currentMillis, rpm}; //cambiar count a rpm, ojo
     }
 
     lastMillis = currentMillis;

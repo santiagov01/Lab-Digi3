@@ -5,6 +5,9 @@
 #define ENCODER_PIN     16
 #define PULSOS_POR_REV  20
 
+#define MIN_PWM         0
+#define MAX_PWM         130
+
 // === Estructura para guardar datos ===
 struct DataPoint {
   unsigned long timestamp;
@@ -32,6 +35,7 @@ int numPasos = 0;
 
 float last_rpm = 0;
 
+bool subiendo = true;
 
 // --- ISR del encoder ---
 void handleEncoder() {
@@ -91,28 +95,48 @@ void loop() {
   // Manejo de escalones en modo captura
   if (capturando && ahora - lastStepMillis >= 2000) {
     lastStepMillis = ahora;
-    pasoPWM++;
+    //pasoPWM++;
 
-    if (pasoPWM < numPasos) {
-      pwm_actual = pasoPWM * delta_pwm;
-      analogWrite(PWM_PIN, pwm_actual);
-    } else if (pasoPWM < 2 * numPasos) {
-      // fase descendente
-      pwm_actual = (2 * numPasos - pasoPWM - 1) * delta_pwm;
-      analogWrite(PWM_PIN, pwm_actual);
-    } else {
-      // fin de captura
-      analogWrite(PWM_PIN, 0);
-      capturando = false;
-      modo_manual = true;
+    if(subiendo){
+        pwm_actual += pasoPWM;
+        if (pwm_actual >= MAX_PWM) {
+          pwm_actual = MAX_PWM;
+          subiendo = false;
+          analogWrite(PWM_PIN, pwm_actual);
+        }
+    } else{
+        pwm_actual -= pasoPWM;
+        if (pwm_actual <= 0){
+          pwm_actual = 0;
+          analogWrite(PWM_PIN, pwm_actual);
+          capturando = false;
+          modo_manual = true;
+          Serial.println("---- FIN DE CAPTURA ----");
+          for (int i = 0; i < bufferIndex - dataBuffer; i++) {
+            Serial.print(dataBuffer[i].timestamp);
+            Serial.print(",");
+            Serial.print(dataBuffer[i].pwm);
+            Serial.print(",");
+            Serial.println(dataBuffer[i].rpm);
+        }
+    }
 
-      Serial.println("---- FIN DE CAPTURA ----");
-      for (int i = 0; i < bufferIndex - dataBuffer; i++) {
-        Serial.print(dataBuffer[i].timestamp);
-        Serial.print(",");
-        Serial.print(dataBuffer[i].pwm);
-        Serial.print(",");
-        Serial.println(dataBuffer[i].rpm);
+    // if (pasoPWM < numPasos) {
+    //   pwm_actual = pasoPWM * delta_pwm;
+    //   int pwm_map = map(pwm_actual, 0, 100, 0, MAX_PWM);
+    //   analogWrite(PWM_PIN, pwm_map);
+    // } else if (pasoPWM < 2 * numPasos) {
+    //   // fase descendente      
+    //   pwm_actual = (2 * numPasos - pasoPWM - 1) * delta_pwm;
+    //   int pwm_map = map(pwm_actual, 0, 100, 0, MAX_PWM);
+    //   analogWrite(PWM_PIN, pwm_map);
+    // } else {
+    //   // fin de captura
+    //   analogWrite(PWM_PIN, 0);
+    //   capturando = false;
+    //   modo_manual = true;
+
+
       }
     }
   }
@@ -132,13 +156,13 @@ void leerComandosSerial() {
 
       delta_pwm = input.substring(espacio + 1).toInt();
       if (delta_pwm <= 0 || delta_pwm >= 100) {
-        Serial.println("ERROR: Valor de PWM inválido (1-99)");
+        Serial.println("ERROR: Valor de escalones PWM inválido (1-99)");
         return;
       }
 
       // Calcular número de pasos y reiniciar buffer
       numPasos = 100 / delta_pwm;
-      pasoPWM = 0;
+      pasoPWM = map(delta_pwm, 0, 100, 0, MAX_PWM);
       bufferIndex = dataBuffer;
       pwm_actual = 0;
       analogWrite(PWM_PIN, pwm_actual);
@@ -160,7 +184,8 @@ void leerComandosSerial() {
       }
 
       pwm_actual = pwm_manual;
-      analogWrite(PWM_PIN, pwm_actual);
+      int pwm_map = map(pwm_actual, 0, 100, 0, MAX_PWM);
+      analogWrite(PWM_PIN, pwm_map);
       modo_manual = true;
       Serial.print("PWM manual fijado a ");
       Serial.println(pwm_actual);
