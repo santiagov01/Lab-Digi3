@@ -5,10 +5,10 @@ import time
 pwm_pin = Pin(18) # Asignación Pin de PWM
 pwm = PWM(pwm_pin) # Pin de PWM
 pwm.freq(500)  # 500 Hz PWM
-PWM_MAX = 30801 # Valor máximo del ciclo de trabajo (100%) 47% de 65535
-PWM_MIN = 12452 # Valor mínimo del ciclo de trabajo (0%) 19% de 65535
-pwm_step = 5 # Paso de PWM en %
-adjusted_duty = PWM_MIN + (pwm_step * (PWM_MAX - PWM_MIN) / 100) # Ajuste del rango de PWM
+PWM_MAX = 10801 # Valor máximo del ciclo de trabajo (100%) 47% de 65535
+PWM_MIN = 0 # Valor mínimo del ciclo de trabajo (0%) 19% de 65535
+pwm_step = 20 # Paso de PWM en %
+adjusted_duty = PWM_MIN + (pwm_step * (40 - PWM_MIN) / 100) # Ajuste del rango de PWM
 PWM_STEP  = int(adjusted_duty * 65535  / 100) # Conversión a duty_u16
 pwm_direction = "up" # Dirección del ciclo de trabajo (ascendente - descendente)
 
@@ -18,7 +18,7 @@ pulse_count = 0 # Contador de pulsos del encoder
 pulses_per_revolution = 20.0 # Pulsos por revolución del encoder
 
 # RPM buffer
-buffer_size = 3000 # Tamaño del buffer de datos
+buffer_size = 16000 # Tamaño del buffer de datos
 data_buffer = [] # Buffer para almacenar datos de RPM
 buffer_index = 0 # Índice del buffer
 
@@ -41,11 +41,11 @@ def sample_rpm(timer):
     buffer_index += 1
 
     # Verificar si el buffer está lleno
-    if buffer_index >= buffer_size:
-        print('Borrando Buffer')
+    #if buffer_index >= buffer_size:
+
         # Reiniciar el buffer
-        data_buffer.clear()
-        buffer_index = 0
+        #data_buffer.clear()
+        #buffer_index = 0
 
 def PWM_values(timer):
     global pwm, pwm_direction, data_buffer, buffer_index
@@ -60,19 +60,19 @@ def PWM_values(timer):
         duty_u16 -= PWM_STEP
         if duty_u16 <= PWM_MIN:
             duty_u16 = 0
-
+            #pwm_direction = "up"  # Cambia la dirección a ascendente
             # Imprimir todos los datos del buffer
             for i in range(buffer_index):
                 print(f"{data_buffer[i][0]},{data_buffer[i][1]},{data_buffer[i][2]}")  # Imprime el tiempo, RPM y PWM
             data_buffer.clear()
             buffer_index = 0
-            pwm_direction = "stop" # Cambia la dirección a ascendente
+            pwm_direction = "up"
                 
 
     pwm.duty_u16(duty_u16)  # Actualiza el ciclo de trabajo del PWM
 
-print("time(ms),rpm,pwm") # Encabezado de la salida
-
+print("time(ms),RPM,pwm") # Encabezado de la salida
+time.sleep(5)
 #interrupcion para el encoder
 encoder_pin.irq(trigger=Pin.IRQ_RISING, handler=handle_encoder)
 

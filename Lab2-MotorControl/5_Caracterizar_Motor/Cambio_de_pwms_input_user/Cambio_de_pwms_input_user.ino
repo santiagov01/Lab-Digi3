@@ -1,48 +1,70 @@
+/**
+ * @file rpm_pwm_capture.ino
+ * @brief Controla un motor mediante PWM y mide las RPM usando un encoder.
+ * 
+ * Este programa está diseñado para la Raspberry Pi Pico con Arduino. Permite
+ * el control del motor en dos modos: manual y captura escalonada.
+ * En el modo de captura, se genera una secuencia de PWM ascendente y descendente, y
+ * se registran los datos (timestamp, RPM, PWM) en un buffer. En modo manual,
+ * el usuario puede fijar un valor de PWM específico y monitorear en tiempo real.
+ * 
+ * Comandos soportados por el monitor serial:
+ * - `START <valor>`: Inicia la captura con un incremento/decremento de PWM de <valor>% por paso.
+ * - `PWM <valor>`: Fija un valor de PWM en modo manual (0–100).
+ */
 // === Configuración PWM y Encoder ===
-#define PWM_PIN         18
-#define PWM_FREQ        500
-#define PWM_RESOLUTION  8
-#define ENCODER_PIN     16
-#define PULSOS_POR_REV  20
+#define PWM_PIN         18     ///< Pin de salida PWM al motor.
+#define PWM_FREQ        500    ///< Frecuencia del PWM.
+#define PWM_RESOLUTION  8      ///< Resolución del PWM en bits.
+#define ENCODER_PIN     16     ///< Pin de entrada del encoder.
+#define PULSOS_POR_REV  20     ///< Pulsos por revolución del encoder.
 
-#define MIN_PWM         0
-#define MAX_PWM         130
+#define MIN_PWM         0      ///< Valor mínimo de PWM.
+#define MAX_PWM         130    ///< Valor máximo de PWM.
 
 // === Estructura para guardar datos ===
+
+/**
+ * @struct DataPoint
+ * @brief Almacena un punto de datos con tiempo, RPM y PWM.
+ */
 struct DataPoint {
-  unsigned long timestamp;
-  float rpm;
-  int pwm;
+  unsigned long timestamp; ///< Marca de tiempo en milisegundos.
+  float rpm;               ///< Revoluciones por minuto.
+  int pwm;                 ///< Valor de PWM aplicado.
 };
 
-const int bufferSize = 5000;
-DataPoint dataBuffer[bufferSize];
-DataPoint* bufferIndex = dataBuffer;
+const int bufferSize = 5000;          ///< Tamaño del búfer de datos.
+DataPoint dataBuffer[bufferSize];     ///< Arreglo para almacenar datos.
+DataPoint* bufferIndex = dataBuffer;  ///< Índice actual del búfer.
 
-volatile int pulseCount = 0;
-unsigned long lastSampleMillis = 0;
-unsigned long lastPrintMillis = 0;
-unsigned long lastStepMillis = 0;
+volatile int pulseCount = 0;          ///< Conteo de pulsos del encoder (variable compartida con ISR).
+unsigned long lastSampleMillis = 0;   ///< Último tiempo de muestreo.
+unsigned long lastPrintMillis = 0;    ///< Último tiempo de impresión por serial.
+unsigned long lastStepMillis = 0;     ///< Último tiempo de paso PWM.
 
+bool capturando = false;      ///< Indica si se está capturando datos.
+bool modo_manual = true;      ///< Indica si está en modo manual.
+int pwm_manual = 0;           ///< Valor de PWM fijado manualmente.
+int pwm_actual = 0;           ///< PWM actual aplicado.
+int delta_pwm = 0;            ///< Paso entre niveles de PWM.
+int pasoPWM = 0;              ///< Valor de paso PWM (map del delta).
+int numPasos = 0;             ///< Número de pasos PWM calculado.
 
-bool capturando = false;
-bool modo_manual = true;
-int pwm_manual = 0;
-int pwm_actual = 0;
-int delta_pwm = 0;
-int pasoPWM = 0; // índice del paso actual
-int numPasos = 0;
+float last_rpm = 0;           ///< Último valor de RPM leído.
 
-float last_rpm = 0;
+bool subiendo = true;         ///< Dirección actual del escalón PWM.
 
-bool subiendo = true;
-
-// --- ISR del encoder ---
+/**
+ * @brief Rutina de interrupción para contar los pulsos del encoder.
+ */
 void handleEncoder() {
   pulseCount++;
 }
 
-// --- Inicialización ---
+/**
+ * @brief Configura pines, PWM, interrupciones y comunicación serial.
+ */
 void setup() {
   Serial.begin(115200);
   analogWriteFreq(PWM_FREQ);
@@ -59,7 +81,10 @@ void setup() {
   Serial.println("Sistema listo. Use comandos: START <valor> o PWM <valor>");
 }
 
-// --- LOOP PRINCIPAL ---
+/**
+ * @brief Bucle principal del programa.
+ * Realiza lectura de comandos, medición de RPM y control del motor.
+ */
 void loop() {
   leerComandosSerial();
 
@@ -67,7 +92,7 @@ void loop() {
 
   // Medición de RPM cada 4 ms
   if (ahora - lastSampleMillis >= 4) {
-    lastSampleMillis = ahora;
+    lastSampleMillis = millis();
     noInterrupts();
     int count = pulseCount;
     pulseCount = 0;
@@ -83,27 +108,29 @@ void loop() {
     }
 
     // En modo manual, imprimir cada 500 ms
-    if (modo_manual && ahora - lastPrintMillis >= 500) {
-      lastPrintMillis = ahora;
+    if (modo_manual && (millis() - lastPrintMillis) >= 500) {
+      lastPrintMillis = millis();
       Serial.print("PWM: ");
       Serial.print(pwm_actual);
       Serial.print(" | RPM: ");
       Serial.println(avg_rpm);
     }
+    
   }
 
   // Manejo de escalones en modo captura
-  if (capturando && ahora - lastStepMillis >= 2000) {
-    lastStepMillis = ahora;
-    //pasoPWM++;
+  if (capturando && (millis() - lastStepMillis) >= 2000) {
+    lastStepMillis = millis();
 
     if(subiendo){
         pwm_actual += pasoPWM;
+        
         if (pwm_actual >= MAX_PWM) {
           pwm_actual = MAX_PWM;
           subiendo = false;
-          analogWrite(PWM_PIN, pwm_actual);
+          //analogWrite(PWM_PIN, pwm_actual);
         }
+      analogWrite(PWM_PIN, pwm_actual);
     } else{
         pwm_actual -= pasoPWM;
         if (pwm_actual <= 0){
@@ -118,31 +145,21 @@ void loop() {
             Serial.print(dataBuffer[i].pwm);
             Serial.print(",");
             Serial.println(dataBuffer[i].rpm);
+          }
         }
-    }
-
-    // if (pasoPWM < numPasos) {
-    //   pwm_actual = pasoPWM * delta_pwm;
-    //   int pwm_map = map(pwm_actual, 0, 100, 0, MAX_PWM);
-    //   analogWrite(PWM_PIN, pwm_map);
-    // } else if (pasoPWM < 2 * numPasos) {
-    //   // fase descendente      
-    //   pwm_actual = (2 * numPasos - pasoPWM - 1) * delta_pwm;
-    //   int pwm_map = map(pwm_actual, 0, 100, 0, MAX_PWM);
-    //   analogWrite(PWM_PIN, pwm_map);
-    // } else {
-    //   // fin de captura
-    //   analogWrite(PWM_PIN, 0);
-    //   capturando = false;
-    //   modo_manual = true;
-
-
+      analogWrite(PWM_PIN, pwm_actual);
       }
     }
   }
-}
 
-// --- Función para leer comandos seriales ---
+
+/**
+ * @brief Procesa los comandos recibidos por el puerto serial.
+ * 
+ * Comandos disponibles:
+ * - `START <valor>`: Inicia captura con pasos PWM de tamaño <valor>.
+ * - `PWM <valor>`: Aplica PWM manual.
+ */
 void leerComandosSerial() {
   if (Serial.available()) {
     String input = Serial.readStringUntil('\n');

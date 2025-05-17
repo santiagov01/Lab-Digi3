@@ -1,37 +1,97 @@
+/**
+ * @file pwm_encoder_logger.ino
+ * @brief Registro de RPM con encoder y control PWM escalonado en Raspberry Pi Pico.
+ *
+ * Este programa genera una señal PWM escalonada y mide la velocidad de rotación (RPM)
+ * utilizando un encoder. Los datos se almacenan en un buffer y luego se transmiten por
+ * puerto serial una vez finalizado el ciclo de PWM.
+ *
+ */
+
 // === Configuración PWM y Encoder ===
-#define PWM_PIN         18      // Pin GPIO para salida PWM
-#define PWM_FREQ        500     // Frecuencia PWM (Hz)
-#define PWM_RESOLUTION  8       // Bits resolución PWM (0-255)
-#define ENCODER_PIN     16      // Pin del encoder
+
+/** @brief Pin GPIO utilizado para la señal PWM de salida. */
+#define PWM_PIN         18
+
+/** @brief Frecuencia de la señal PWM en Hertz. */
+#define PWM_FREQ        500
+
+/** @brief Resolución del PWM en bits. (8 bits = 0-255) */
+#define PWM_RESOLUTION  8
+
+/** @brief Pin GPIO conectado al encoder (interrupción por flanco de subida). */
+#define ENCODER_PIN     16
+
+/** @brief Pulsos por revolución del encoder. */
 const int pulsesPerRevolution = 20;
-// --- Estructura para guardar tiempo y rpm ---
+
+/**
+ * @struct DataPoint
+ * @brief Estructura para guardar el tiempo y la velocidad (RPM).
+ */
 struct DataPoint {
-  unsigned long timestamp;
-  float rpm;
+  unsigned long timestamp; ///< Tiempo en milisegundos.
+  float rpm;               ///< Velocidad en revoluciones por minuto.
 };
 
+// === Buffer de datos ===
+
+/** @brief Tamaño del buffer para almacenar datos de RPM. */
 const int bufferSize = 6000;
-const int last_pos_buffer = bufferSize-1;
-DataPoint dataBuffer[bufferSize]; // Se permite puntero hasta posición bufferSize
+
+/** @brief Última posición válida del buffer. */
+const int last_pos_buffer = bufferSize - 1;
+
+/** @brief Buffer circular donde se almacenan los datos de tiempo y RPM. */
+DataPoint dataBuffer[bufferSize];
+
+/** @brief Puntero al índice actual de escritura en el buffer. */
 DataPoint* bufferIndex = &dataBuffer[0];
 
+/** @brief Contador de pulsos del encoder (modificado por interrupción). */
 volatile int pulseCount = 0;
+
+/** @brief Marca de tiempo de la última muestra de RPM. */
 unsigned long lastSampleMillis = 0;
+
+/** @brief Marca de tiempo para el próximo cambio de escalón PWM. */
 unsigned long lastSampleMillis_to_2_Seg = 0;
 
-const int escalonesPWM[10] = {24,48,72,96,120,96,72,48,24,0}; // 20% por paso, ascendente y descendente
-const int * indexEscalones = &escalonesPWM[0];
+/**
+ * @brief Escalones de PWM (20% por paso).
+ * Contiene valores ascendentes y luego descendentes.
+ */
+const int escalonesPWM[10] = {24,48,72,96,120,96,72,48,24,0};
 
-const unsigned int tiempoPorEscalon = 2000;  // 2 segundos por escalón
+/** @brief Puntero al escalón actual del arreglo de PWM. */
+const int* indexEscalones = &escalonesPWM[0];
+
+/** @brief Tiempo en milisegundos que se mantiene cada escalón. */
+const unsigned int tiempoPorEscalon = 2000;
+
+/** @brief Índice del paso actual en el patrón de PWM. */
 int pasoActual = 0;
 
+/** @brief Último valor calculado de RPM. */
 float last_rpm = 0;
+
+/** @brief Contador de datos almacenados en el buffer. */
 int contador = 0;
 
+/**
+ * @brief Manejador de interrupción del encoder.
+ *
+ * Incrementa el contador de pulsos cuando se detecta un flanco de subida.
+ */
 void handleEncoder() {
   pulseCount++;
 }
 
+/**
+ * @brief Función de configuración inicial de Arduino.
+ *
+ * Inicializa la comunicación serial, el PWM, el pin del encoder y la interrupción.
+ */
 void setup() {
   Serial.begin(115200);
   analogWriteFreq(PWM_FREQ);
@@ -40,17 +100,22 @@ void setup() {
   pinMode(ENCODER_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN), handleEncoder, RISING);
 
-  delay(6000); // Tiempo para que el motor esté en reposo
-  analogWrite(PWM_PIN, *indexEscalones);//*indexEscalones = Escalon Actual
+  delay(6000); // Espera para que el motor esté en reposo
+  analogWrite(PWM_PIN, *indexEscalones); // Primer escalón de PWM
   Serial.println("Tiempo(ms),RPM");
+
   lastSampleMillis = millis();
   lastSampleMillis_to_2_Seg = millis();
 }
 
+/**
+ * @brief Bucle principal.
+ *
+ * Captura la RPM cada 4 ms, cambia el PWM cada 2 segundos,
+ * y guarda los datos en el buffer. Al final transmite los datos por serial.
+ */
 void loop() {
-
-  // Capturar RPM cada 4 ms
-  if (millis() - lastSampleMillis >= 4) { //Tiempo actual- el anterior tomado
+  if (millis() - lastSampleMillis >= 4) {
     noInterrupts();
     int count = pulseCount;
     pulseCount = 0;
@@ -58,24 +123,17 @@ void loop() {
 
     lastSampleMillis = millis();
 
-    // Guardar dato en buffer
     bufferIndex->timestamp = millis();
-    // (pulsos en el intervalo/pulsos por revolucion)*(60segundos/tiempo en segundos)15000 = 60/0.004
-    
-    // float rpm = count * (15000.0 / pulsesPerRevolution);
-    // float avg_rpm = (last_rpm + rpm)/2 // para tener un valor más real
-    // float last_rpm = rpm; // actualiza rpms anteriores
-
     bufferIndex->rpm = count * (15000.0 / pulsesPerRevolution);
     bufferIndex++;
-    contador++; //revisa la cantidad de escrituras para evitar transmitir los ceros al final de la transmisión
-    
-    // Cambiar PWM cada 2 segundos
+    contador++;
+
     if (millis() - lastSampleMillis_to_2_Seg >= 2000) {
       lastSampleMillis_to_2_Seg = millis();
-      indexEscalones++; //a la siguiente posición
-      analogWrite(PWM_PIN, *indexEscalones);//*indexEscalones = Escalon Actual
-      if (!(*indexEscalones)){ // *indexEscalones = 0?
+      indexEscalones++;
+      analogWrite(PWM_PIN, *indexEscalones);
+
+      if (!(*indexEscalones)) {
         int i = 0;
         while(i < contador) {
           Serial.print(dataBuffer[i].timestamp);
@@ -83,9 +141,8 @@ void loop() {
           Serial.println(dataBuffer[i].rpm);
           i++;
         }
-      while (true); // Finaliza programa
-      } 
+        while (true); // Fin del programa
+      }
     }
   }
-  
-} 
+}
